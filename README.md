@@ -1,13 +1,8 @@
 Construindo imagem:
 
-    <!-- docker build --no-cache -t gwdb .
-    docker compose up
     cp .env.example .env
-    docker exec -it gwdb composer install -->
-
-cp .env.example .env
-docker compose up --build
-docker exec -it gwdb composer install
+    docker compose up --build
+    docker exec -it gwdb composer install
 
 
 Teste de conexão:
