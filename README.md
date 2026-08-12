@@ -1,9 +1,14 @@
 Construindo imagem:
 
-    docker build --no-cache -t gwmariadb .
+    <!-- docker build --no-cache -t gwdb .
     docker compose up
     cp .env.example .env
-    docker exec -it gwmariadb composer install
+    docker exec -it gwdb composer install -->
+
+cp .env.example .env
+docker compose up --build -d
+docker exec -it gwdb composer install
+
 
 Teste de conexão:
 

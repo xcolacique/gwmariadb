@@ -1,13 +1,13 @@
 services:
-  gwmariadb:
-    image: gwmariadb:latest
-    container_name: gwmariadb
+  gwdb:
+    image: gwdb:latest
+    container_name: gwdb
     ports:
       - "8080:3142"
     depends_on:
       - mariadb
     networks:
-      - gwmariadb-network
+      - gwdb-network
     volumes:
       - ./:/var/www/html
     environment:
@@ -22,12 +22,12 @@ services:
 
   mariadb:
     image: mariadb:11
-    container_name: gwmariadb_mariadb
+    container_name: gwdb_mariadb
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: gwmariadb
+      MYSQL_ROOT_PASSWORD: gwdb
     networks:
-      - gwmariadb-network
+      - gwdb-network
     ports:
       - "8306:3306"
     volumes:
@@ -35,7 +35,7 @@ services:
       - ./docker/db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
 networks:
-  gwmariadb-network:
+  gwdb-network:
 
 volumes:
   db_data:
