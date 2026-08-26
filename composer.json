@@ -1,9 +1,9 @@
 {
-    "name": "fflch/gwmariadb",
+    "name": "fflch/gwdb",
     "type": "project",
     "autoload": {
         "psr-4": {
-            "Fflch\\Gwmariadb\\": "src/"
+            "Fflch\\Gwdb\\": "src/"
         }
     },
     "authors": [
