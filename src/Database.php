@@ -1,58 +1,95 @@
 <?php
 
-namespace App;
+namespace Fflch\Gwdb;
 
-class Database {
-    private static function db() {
-        $DB_HOST = $_ENV['DB_HOST'] ?? $_SERVER['DB_HOST'] ?? '127.0.0.1';
-        $DB_USER = $_ENV['DB_USER'] ?? $_SERVER['DB_USER'] ?? 'root';
-        $DB_PASS = $_ENV['DB_PASS'] ?? $_SERVER['DB_PASS'] ?? '';
-        $DB_PORT = $_ENV['DB_PORT'] ?? $_SERVER['DB_PORT'] ?? '8306';
+use Fflch\Gwdb\Drivers\DriverInterface;
+use Fflch\Gwdb\Drivers\MySQLDriver;
+use Fflch\Gwdb\Drivers\PostgresDriver;
+use PDOException;
 
-        return new \PDO(
-            "mysql:host=$DB_HOST;port=$DB_PORT",
-            $DB_USER,
-            $DB_PASS,
-            [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
-        );
+class Database
+{
+    /** @var array<string, DriverInterface> cache de instancias, uma por tipo de driver */
+    private static array $drivers = [];
+
+    /** Tipo escolhido explicitamente para a requisicao atual (ver usar()) */
+    private static ?string $tipoAtual = null;
+
+    /**
+     * Define qual driver usar nas chamadas seguintes desta requisicao.
+     * Chame no bootstrap (index.php) antes de despachar a action, com o
+     * valor que veio no corpo do JSON, se houver.
+     *
+     * @param bool $persistirNaSessao Se true, grava a escolha em $_SESSION
+     *   para que requisicoes futuras (com o mesmo cookie) nao precisem
+     *   informar "driver" de novo. Exige session_start() ja chamado.
+     */
+    public static function usar(?string $tipo, bool $persistirNaSessao = false): void
+    {
+        self::$tipoAtual = $tipo ?: null;
+
+        if ($persistirNaSessao && self::$tipoAtual && session_status() === PHP_SESSION_ACTIVE) {
+            $_SESSION['db_driver'] = self::$tipoAtual;
+        }
     }
 
-    public static function listar_databases() {
-        $stmt = self::db()->query("
-            SHOW DATABASES
-            WHERE `Database` NOT IN (
-                'information_schema',
-                'mysql',
-                'performance_schema',
-                'sys',
-                'm_ysql',
-                '_m_ysql'
-            )
-        ");
+    private static function driver(): DriverInterface
+    {
+        $tipoNaSessao = session_status() === PHP_SESSION_ACTIVE
+            ? ($_SESSION['db_driver'] ?? null)
+            : null;
 
-        return json_encode($stmt->fetchAll(\PDO::FETCH_COLUMN));
+        $tipo = self::$tipoAtual
+            ?? $tipoNaSessao
+            ?? $_ENV['DB_DRIVER_PADRAO'] ?? $_SERVER['DB_DRIVER_PADRAO']
+            ?? 'mysql';
+
+        // normaliza apelidos para uma chave unica de cache
+        $chave = match ($tipo) {
+            'pgsql', 'postgres', 'postgresql' => 'pgsql',
+            'mysql', 'mariadb' => 'mysql',
+            default => throw new \RuntimeException("Driver '$tipo' nao suportado"),
+        };
+
+        if (isset(self::$drivers[$chave])) {
+            return self::$drivers[$chave];
+        }
+
+        self::$drivers[$chave] = match ($chave) {
+            'pgsql' => new PostgresDriver(
+                $_ENV['DB_PGSQL_HOST'] ?? $_SERVER['DB_PGSQL_HOST'] ?? '127.0.0.1',
+                $_ENV['DB_PGSQL_PORT'] ?? $_SERVER['DB_PGSQL_PORT'] ?? '5432',
+                $_ENV['DB_PGSQL_USER'] ?? $_SERVER['DB_PGSQL_USER'] ?? 'postgres',
+                $_ENV['DB_PGSQL_PASS'] ?? $_SERVER['DB_PGSQL_PASS'] ?? '',
+                $_ENV['DB_PGSQL_ADMIN_NAME'] ?? $_SERVER['DB_PGSQL_ADMIN_NAME'] ?? 'postgres'
+            ),
+            'mysql' => new MySQLDriver(
+                $_ENV['DB_MYSQL_HOST'] ?? $_SERVER['DB_MYSQL_HOST'] ?? '127.0.0.1',
+                $_ENV['DB_MYSQL_PORT'] ?? $_SERVER['DB_MYSQL_PORT'] ?? '3306',
+                $_ENV['DB_MYSQL_USER'] ?? $_SERVER['DB_MYSQL_USER'] ?? 'root',
+                $_ENV['DB_MYSQL_PASS'] ?? $_SERVER['DB_MYSQL_PASS'] ?? ''
+            ),
+        };
+
+        return self::$drivers[$chave];
     }
 
-    public static function listar_usuarios() {
-        $stmt = self::db()->query("
-            SELECT User
-            FROM mysql.user
-            WHERE User NOT IN (
-                'root',
-                'mysql',
-                'mariadb.sys',
-                'debian-sys-maint',
-                'mysql.session',
-                'mysql.sys',
-                'healthcheck',
-                'admin'
-            )
-            AND User <> ''
-            GROUP BY User
-            ORDER BY User
-        ");
+    public static function listar_databases(): string
+    {
+        try {
+            return json_encode(self::driver()->listarDatabases());
+        } catch (PDOException $e) {
+            return json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+        }
+    }
 
-        return json_encode($stmt->fetchAll(\PDO::FETCH_COLUMN));
+    public static function listar_usuarios(): string
+    {
+        try {
+            return json_encode(self::driver()->listarUsuarios());
+        } catch (PDOException $e) {
+            return json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+        }
     }
 
     public static function database_existe(string $nome): bool
@@ -60,7 +97,7 @@ class Database {
         $lista = json_decode(self::listar_databases(), true);
         return in_array($nome, $lista ?? []);
     }
-    
+
     public static function usuario_existe(string $nome): bool
     {
         $lista = json_decode(self::listar_usuarios(), true);
@@ -71,7 +108,7 @@ class Database {
     {
         if (!preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/', $nome)) {
             return json_encode(['sucesso' => false, 'mensagem' => 'Nome invalido']);
-        } else if (strlen($nome) > 64) {
+        } elseif (strlen($nome) > 64) {
             return json_encode(['sucesso' => false, 'mensagem' => 'Nome muito grande']);
         }
 
@@ -84,9 +121,9 @@ class Database {
         }
 
         try {
-            self::db()->exec("CREATE DATABASE `$nome`");
+            self::driver()->criarDatabase($nome);
             return json_encode(['sucesso' => true, 'mensagem' => 'Database criada com sucesso']);
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             return json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
         }
     }
@@ -95,7 +132,7 @@ class Database {
     {
         if (!preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/', $nome)) {
             return json_encode(['sucesso' => false, 'mensagem' => 'Nome invalido']);
-        } else if (strlen($nome) > 32) {
+        } elseif (strlen($nome) > 32) {
             return json_encode(['sucesso' => false, 'mensagem' => 'Nome muito grande']);
         }
 
@@ -106,9 +143,9 @@ class Database {
         $senha = self::gerar_senha();
 
         try {
-            self::db()->exec("CREATE USER `$nome`@'%' IDENTIFIED BY '$senha'");
+            self::driver()->criarUsuario($nome, $senha);
             return json_encode(['sucesso' => true, 'mensagem' => 'Usuario criado com sucesso', 'senha' => $senha]);
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             return json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
         }
     }
@@ -138,7 +175,7 @@ class Database {
 
         return json_encode(['sucesso' => true, 'senha' => $criar_usuario['senha']]);
     }
-            
+
     public static function conceder_privilegios(string $nome): string
     {
         if (!self::database_existe($nome)) {
@@ -150,10 +187,9 @@ class Database {
         }
 
         try {
-            self::db()->exec("GRANT ALL PRIVILEGES ON `$nome`.* TO `$nome`@'%'");
-            self::db()->exec("FLUSH PRIVILEGES");
+            self::driver()->concederPrivilegios($nome);
             return json_encode(['sucesso' => true, 'mensagem' => 'Privilegios concedidos com sucesso']);
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             return json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
         }
     }
@@ -182,9 +218,9 @@ class Database {
         $senha = self::gerar_senha();
 
         try {
-            self::db()->exec("ALTER USER `$nome`@'%' IDENTIFIED BY '$senha'");
+            self::driver()->trocarSenha($nome, $senha);
             return json_encode(['sucesso' => true, 'senha' => $senha]);
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             return json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
         }
     }
