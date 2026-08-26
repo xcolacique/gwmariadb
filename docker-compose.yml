@@ -57,6 +57,36 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
 
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: gwdb_phpmyadmin
+    restart: always
+    depends_on:
+      - mariadb
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: gwdb
+    networks:
+      - gwdb-network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: gwdb_pgadmin
+    restart: always
+    depends_on:
+      - postgres
+    ports:
+      - "8082:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    networks:
+      - gwdb-network
+
 networks:
   gwdb-network:
 
